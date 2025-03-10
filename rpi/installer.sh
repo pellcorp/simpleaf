@@ -155,6 +155,39 @@ function install_config_updater() {
     fi
 }
 
+# copied from install_debian.sh
+install_klipper_packages()
+{
+    # Packages for python cffi
+    PKGLIST="virtualenv python3-dev libffi-dev build-essential"
+    # kconfig requirements
+    PKGLIST="${PKGLIST} libncurses-dev"
+    # hub-ctrl
+    PKGLIST="${PKGLIST} libusb-dev"
+    # AVR chip installation and building
+    PKGLIST="${PKGLIST} avrdude gcc-avr binutils-avr avr-libc"
+    # ARM chip installation and building
+    PKGLIST="${PKGLIST} stm32flash libnewlib-arm-none-eabi"
+    PKGLIST="${PKGLIST} gcc-arm-none-eabi binutils-arm-none-eabi libusb-1.0 pkg-config"
+
+    # Update system package info
+    sudo apt-get update
+
+    # Install desired packages
+    sudo apt-get install --yes ${PKGLIST}
+}
+
+function setup_base_packages() {
+  local mode=$1
+
+  grep -q "base" $HOME/pellcorp.done
+  if [ $? -ne 0 ] || [ "$mode" != "update" ]; then
+    sudo apt-get install -y git
+    install_klipper_packages
+    echo "base" >> $HOME/pellcorp.done
+  fi
+}
+
 function install_webcam() {
     local mode=$1
     
@@ -522,10 +555,7 @@ function install_klipper() {
 
         klipper_repo=klipper
         existing_klipper_repo=$(cat $HOME/pellcorp.klipper 2> /dev/null)
-        if [ "$mode" = "update" ] && [ "$existing_klipper_repo" = "k1-carto-klipper" ]; then
-            echo "INFO: Forcing Klipper repo to be switched from pellcorp/${existing_klipper_repo} to pellcorp/${klipper_repo}"
-            cleanup_klipper
-        elif [ "$mode" != "update" ] && [ -d $HOME/klipper ]; then
+        if [ "$mode" != "update" ] && [ -d $HOME/klipper ]; then
             cleanup_klipper
         fi
 
@@ -542,18 +572,11 @@ function install_klipper() {
         fi
 
         if [ ! -d $HOME/klipper/.git ]; then
-            echo "INFO: Installing ${klipper_repo} ..."
-
-            if [ "$AF_GIT_CLONE" = "ssh" ]; then
-                export GIT_SSH_IDENTITY=${klipper_repo}
-                export GIT_SSH=$HOME/pellcorp/k1/ssh/git-ssh.sh
-                git clone git@github.com:pellcorp/${klipper_repo}.git $HOME/klipper || exit $?
-                # reset the origin url to make moonraker happy
-                cd $HOME/klipper && git remote set-url origin https://github.com/pellcorp/${klipper_repo}.git && cd - > /dev/null
-            else
-                git clone https://github.com/pellcorp/${klipper_repo}.git $HOME/klipper || exit $?
+            if [ -d $HOME/klipper ]; then
+              rm -rf $HOME/klipper
             fi
-            [ -d /usr/share/klipper ] && rm -rf /usr/share/klipper
+            echo "INFO: Installing ${klipper_repo} ..."
+            git clone https://github.com/pellcorp/klipper.git $HOME/klipper || exit $?
         else
             cd $HOME/klipper/
             remote_repo=$(git remote get-url origin | awk -F '/' '{print $NF}' | sed 's/.git//g')
@@ -567,6 +590,11 @@ function install_klipper() {
                 update_repo $HOME/klipper master || exit $?
             fi
         fi
+
+        if [ ! -d $HOME/klipper-env ]; then
+          python3 -m venv $HOME/klipper-env
+        fi
+
 
         echo "INFO: Updating klipper config ..."
         /usr/share/klippy-env/bin/python3 -m compileall $HOME/klipper/klippy || exit $?
@@ -1666,39 +1694,17 @@ cd - > /dev/null
     # to avoid cluttering the printer_data/config directory lets move stuff
     mkdir -p $HOME/printer_data/config/backups/
 
-    # we don't do these kinds of backups anymore
-    rm $HOME/printer_data/config/*.bkp 2> /dev/null
-
     echo "INFO: Backing up existing configuration ..."
     $HOME/pellcorp/k1/tools/backups.sh --create
     echo
 
     mkdir -p $HOME/pellcorp-backups
-    # the pellcorp-backups do not need .pellcorp extension, so this is to fix backwards compatible
-    if [ -f $HOME/pellcorp-backups/printer.pellcorp.cfg ]; then
-        mv $HOME/pellcorp-backups/printer.pellcorp.cfg $HOME/pellcorp-backups/printer.cfg
-    fi
-
-    # so if the installer has never been run we should grab a backup of the printer.cfg
-    if [ ! -f $HOME/pellcorp.done ] && [ ! -f $HOME/pellcorp-backups/printer.factory.cfg ]; then
-        # just to make sure we don't accidentally copy printer.cfg to backup if the backup directory
-        # is deleted, add a stamp to config files to we can know for sure.
-        if ! grep -q "# Modified by Simple AF " $HOME/printer_data/config/printer.cfg; then
-            cp $HOME/printer_data/config/printer.cfg $HOME/pellcorp-backups/printer.factory.cfg
-        else
-          echo "WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING"
-          echo "WARNING: No pristine factory printer.cfg available - config overrides are disabled!"
-          echo "WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING"
-        fi
-    fi
 
     if [ "$skip_overrides" = "true" ]; then
         echo "INFO: Configuration overrides will not be saved or applied"
     fi
 
-    # we want to disable creality services at the very beginning otherwise shit gets weird
-    # if the crazy creality S55klipper_service is still copying files
-    disable_creality_services
+    setup_base_packages
 
     install_config_updater
 
