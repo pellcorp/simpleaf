@@ -1,0 +1,17 @@
+[Unit]
+Description=GuppyScreen
+After=moonraker.service
+StartLimitIntervalSec=0
+ConditionPathExists=/dev/tty1
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=pi
+WorkingDirectory=/home/pi/guppyscreen
+ExecStartPre="/home/pi/guppyscreen/cursor.sh"
+ExecStart="/home/pi/guppyscreen/guppyscreen"
+
+[Install]
+WantedBy=multi-user.target

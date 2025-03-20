@@ -1,7 +1,8 @@
 #!/bin/bash
 
-KDIR="$HOME/klipper"
-BKDIR="$HOME/beacon-klipper"
+BASEDIR=/home/pi
+KDIR="$BASEDIR/klipper"
+BKDIR="$BASEDIR/beacon-klipper"
 
 echo "Beacon: linking modules into klipper"
 for file in beacon.py; do

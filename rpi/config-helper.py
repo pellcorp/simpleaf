@@ -4,12 +4,11 @@
 # https://github.com/pyscaffold/configupdater
 #
 
+BASEDIR = "/home/pi"
+PRINTER_CONFIG_DIR = f"{BASEDIR}/printer_data/config"
+
 import optparse, io, os, sys
 from configupdater import ConfigUpdater
-from pathlib import Path
-HOME = Path.home()
-
-PRINTER_CONFIG_DIR = f"{HOME}/printer_data/config/"
 
 
 def remove_section_value(updater, section_name, key):
@@ -159,12 +158,17 @@ def add_section(updater, section_name):
 def override_cfg(updater, override_cfg_file,
                  allow_delete_section=True,
                  allow_delete_entry=True,
-                 allow_new_section=True):
+                 allow_new_section=True,
+                 include_sections=None,
+                 exclude_sections=None):
     overrides = ConfigUpdater(strict=False, allow_no_value=True, space_around_delimiters=False, delimiters=(':'))
     updated = False
     with open(override_cfg_file, 'r') as file:
         overrides.read_file(file)
         for section_name in overrides.sections():
+            if (exclude_sections and section_name in exclude_sections) or (include_sections and section_name not in include_sections):
+                continue
+
             section = overrides.get_section(section_name, None)
             section_action = section.get('__action__', None)
             if allow_delete_section and section_action and section_action.value == 'DELETED':
@@ -220,10 +224,12 @@ def main():
     opts.add_option("", "--add-section", dest="add_section", nargs=1, type="string")
     opts.add_option("", "--ignore-missing", dest="ignore_missing", default=False, action='store_true')
     opts.add_option("", "--overrides", dest="overrides", nargs=1, type="string")
+    opts.add_option("", "--exclude-sections", dest="exclude_sections", default=False)
+    opts.add_option("", "--include-sections", dest="include_sections", default=False)
     opts.add_option("", "--patches", dest="patches", nargs=1, type="string")
     options, _ = opts.parse_args()
 
-    if os.path.exists(options.config_file):
+    if '/' in options.config_file and os.path.exists(options.config_file):
         config_file = options.config_file
     elif os.path.exists(f"{PRINTER_CONFIG_DIR}/{options.config_file}"):
         config_file = f"{PRINTER_CONFIG_DIR}/{options.config_file}"
@@ -308,13 +314,17 @@ def main():
             raise Exception(f"Patches Config File {options.overrides} not found")
     elif options.overrides:
         if os.path.exists(options.overrides):
+            include_sections = options.include_sections.split(',') if options.include_sections else None
+            exclude_sections = options.exclude_sections.split(',') if options.exclude_sections else None
             allow_delete_section = (printer_cfg or fan_control)
             allow_delete_entry = printer_cfg
             allow_new_section = (fan_control or printer_cfg or moonraker_conf)
             updated = override_cfg(updater, options.overrides,
                                    allow_delete_section=allow_delete_section,
                                    allow_delete_entry=allow_delete_entry,
-                                   allow_new_section=allow_new_section)
+                                   allow_new_section=allow_new_section,
+                                   include_sections=include_sections,
+                                   exclude_sections=exclude_sections)
         else:
             raise Exception(f"Overrides Config File {options.overrides} not found")
     else:
@@ -327,6 +337,10 @@ def main():
                 updater.write(file)
         else:
             with open(config_file, 'w') as file:
+                if options.overrides:
+                    print(f"Applied overrides to {config_file}")
+                elif options.patches:
+                    print(f"Applied mount overrides to {config_file}")
                 updater.write(file)
     elif not read_only and options.output:
         with open(options.output, 'w') as file:

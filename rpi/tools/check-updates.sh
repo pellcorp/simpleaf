@@ -1,17 +1,19 @@
 #!/bin/sh
 
-if [ ! -f $HOME/pellcorp.done ]; then
+BASEDIR=/home/pi
+
+if [ ! -f $BASEDIR/pellcorp.done ]; then
     echo "ERROR: Missing installation"
     exit 1
 fi
 
-cd $HOME/pellcorp
+cd $BASEDIR/pellcorp
 git fetch
 
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 echo "You are on branch $BRANCH"
 
-PELLCORP_GIT_SHA=$(cat $HOME/pellcorp.done | grep "installed_sha" | awk -F '=' '{print $2}')
+PELLCORP_GIT_SHA=$(cat $BASEDIR/pellcorp.done | grep "installed_sha" | awk -F '=' '{print $2}')
 if [ -n "$PELLCORP_GIT_SHA" ]; then
     CURRENT_REVISION=$PELLCORP_GIT_SHA
 else
