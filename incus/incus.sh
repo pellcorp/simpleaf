@@ -1,5 +1,8 @@
 #!/bin/bash
 
+CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+ROOT_DIR=$(dirname $CURRENT_DIR)
+
 sudo iptables -P FORWARD ACCEPT
 sudo ufw allow in on incusbr0
 sudo ufw route allow in on incusbr0
@@ -12,6 +15,7 @@ incus config set klipper security.secureboot false || exit $?
 incus config set klipper limits.cpu 4 || exit $?
 incus config set klipper limits.memory 2048MB || exit $?
 incus config device override klipper root size=16GB || exit $?
+incus config device add klipper projects disk source=$ROOT_DIR path=/opt/projects/ || exit $?
 incus start klipper
 
 echo -n "Waiting for klipper to start ."
@@ -25,12 +29,4 @@ while true; do
   fi
 done
 
-incus exec klipper -- apt-get update
-incus exec klipper -- apt-get install -y openssh-server sudo
-incus exec klipper -- systemctl enable ssh 2> /dev/null
-incus exec klipper -- echo "%sudo  ALL=(ALL) NOPASSWD: ALL" > tee /etc/sudoers.d/nopasswd
-incus exec klipper -- useradd -m pi
-incus exec klipper -- usermod -a -G sudo pi
-incus exec klipper -- "echo pi:raspberry" | chpasswd
-
-
+incus exec klipper -- /opt/projects/incus/setup.sh
