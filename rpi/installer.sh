@@ -9,7 +9,7 @@ fi
 
 # everything else in the script assumes its cloned to $BASEDIR/pellcorp
 # so we must verify this or shit goes wrong
-if [ "$(dirname $(readlink -f $0))" != "$BASEDIR/pellcorp/k1" ]; then
+if [ "$(dirname $(readlink -f $0))" != "$BASEDIR/pellcorp/rpi" ]; then
   >&2 echo "ERROR: This git repo must be cloned to $BASEDIR/pellcorp"
   exit 1
 fi
@@ -128,33 +128,14 @@ function install_webcam() {
         fi
 
         echo "INFO: Updating webcam config ..."
-        # we do not want to start the entware version of the service ever
-        if [ -f /opt/etc/init.d/S96mjpg-streamer ]; then
-            rm /opt/etc/init.d/S96mjpg-streamer
-        fi
-        # kill the existing creality services so that we can use the app right away without a restart
-        pidof cam_app &>/dev/null && killall -TERM cam_app > /dev/null 2>&1
-        pidof mjpg_streamer &>/dev/null && killall -TERM mjpg_streamer > /dev/null 2>&1
 
-        if [ -f /etc/init.d/S50webcam ]; then
-            /etc/init.d/S50webcam stop > /dev/null 2>&1
+        if [ -f /etc/systemd/system/webcam.service ]; then
+            sudo systemctl stop webcam > /dev/null 2>&1
         fi
 
-        # auto_uvc.sh is responsible for starting the web cam_app
-        [ -f /usr/bin/auto_uvc.sh ] && rm /usr/bin/auto_uvc.sh
-        cp $BASEDIR/pellcorp/k1/files/auto_uvc.sh /usr/bin/
-        chmod 777 /usr/bin/auto_uvc.sh
+        cp $BASEDIR/pellcorp/k1/services/webcam.service /etc/systemd/system/
+        sudo systemctl start webcam
 
-        cp $BASEDIR/pellcorp/k1/services/S50webcam /etc/init.d/
-        /etc/init.d/S50webcam start
-
-        if [ -f $BASEDIR/pellcorp.ipaddress ]; then
-          # don't wipe the pellcorp.ipaddress if its been explicitly set to skip
-          PREVIOUS_IP_ADDRESS=$(cat $BASEDIR/pellcorp.ipaddress 2> /dev/null)
-          if [ "$PREVIOUS_IP_ADDRESS" != "skip" ]; then
-            rm $BASEDIR/pellcorp.ipaddress
-          fi
-        fi
         cp $BASEDIR/pellcorp/k1/webcam.conf $BASEDIR/printer_data/config/ || exit $?
 
         echo "webcam" >> $BASEDIR/pellcorp.done
@@ -411,60 +392,6 @@ function install_mainsail() {
     return 0
 }
 
-function install_kamp() {
-    local mode=$1
-
-    grep -q "KAMP" $BASEDIR/pellcorp.done
-    if [ $? -ne 0 ]; then
-        if [ "$mode" != "update" ] && [ -d $BASEDIR/KAMP ]; then
-            rm -rf $BASEDIR/KAMP
-        fi
-        
-        if [ ! -d $BASEDIR/KAMP/.git ]; then
-            echo
-            echo "INFO: Installing KAMP ..."
-            [ -d $BASEDIR/KAMP ] && rm -rf $BASEDIR/KAMP
-
-            if [ "$AF_GIT_CLONE" = "ssh" ]; then
-                export GIT_SSH_IDENTITY=KAMP
-                export GIT_SSH=$BASEDIR/pellcorp/k1/ssh/git-ssh.sh
-                git clone git@github.com:pellcorp/Klipper-Adaptive-Meshing-Purging.git $BASEDIR/KAMP || exit $?
-                cd $BASEDIR/KAMP && git remote set-url origin https://github.com/kyleisah/Klipper-Adaptive-Meshing-Purging.git && cd - > /dev/null
-            else
-                git clone https://github.com/kyleisah/Klipper-Adaptive-Meshing-Purging.git $BASEDIR/KAMP || exit $?
-            fi
-        fi
-
-        echo "INFO: Updating KAMP config ..."
-        ln -sf $BASEDIR/KAMP/Configuration $BASEDIR/printer_data/config/KAMP || exit $?
-
-        cp $BASEDIR/KAMP/Configuration/KAMP_Settings.cfg $BASEDIR/printer_data/config/ || exit $?
-
-        $CONFIG_HELPER --add-include "KAMP_Settings.cfg" || exit $?
-
-        # LINE_PURGE
-        sed -i 's:#\[include ./KAMP/Line_Purge.cfg\]:\[include ./KAMP/Line_Purge.cfg\]:g' $BASEDIR/printer_data/config/KAMP_Settings.cfg
-
-        # SMART_PARK
-        sed -i 's:#\[include ./KAMP/Smart_Park.cfg\]:\[include ./KAMP/Smart_Park.cfg\]:g' $BASEDIR/printer_data/config/KAMP_Settings.cfg
-
-        # lower and longer purge line
-        $CONFIG_HELPER --file KAMP_Settings.cfg --replace-section-entry "gcode_macro _KAMP_Settings" variable_purge_height 0.5
-        $CONFIG_HELPER --file KAMP_Settings.cfg --replace-section-entry "gcode_macro _KAMP_Settings" variable_purge_amount 48
-        # same setting as cancel_retract in start_end.cfg
-        $CONFIG_HELPER --file KAMP_Settings.cfg --replace-section-entry "gcode_macro _KAMP_Settings" variable_tip_distance 7.0
-
-        cp $BASEDIR/printer_data/config/KAMP_Settings.cfg $BASEDIR/pellcorp-backups/
-
-        echo "KAMP" >> $BASEDIR/pellcorp.done
-        sync
-
-        # means klipper needs to be restarted
-        return 1
-    fi
-    return 0
-}
-
 # copied from install_debian.sh
 function install_klipper_packages() {
     # Packages for python cffi
@@ -546,6 +473,12 @@ function install_klipper() {
 
         cp $BASEDIR/pellcorp/k1/start_end.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "start_end.cfg" || exit $?
+
+        ln -sf /usr/data/pellcorp/k1/Line_Purge.cfg /usr/data/printer_data/config/ || exit $?
+        $CONFIG_HELPER --add-include "Line_Purge.cfg" || exit $?
+
+        ln -sf /usr/data/pellcorp/k1/Smart_Park.cfg /usr/data/printer_data/config/ || exit $?
+        $CONFIG_HELPER --add-include "Smart_Park.cfg" || exit $?
 
         cp $BASEDIR/pellcorp/k1/fan_control.cfg $BASEDIR/printer_data/config || exit $?
         $CONFIG_HELPER --add-include "fan_control.cfg" || exit $?
@@ -1214,34 +1147,6 @@ function fixup_client_variables_config() {
     return $changed
 }
 
-function fix_custom_config() {
-    changed=0
-    custom_configs=$(find $BASEDIR/printer_data/config/ -maxdepth 1 -exec grep -l "\[gcode_macro M109\]" {} \;)
-    if [ -n "$custom_configs" ]; then
-        for custom_config in $custom_configs; do
-            filename=$(basename $custom_config)
-            if [ "$filename" != "useful_macros.cfg" ]; then
-                echo "INFO: Deleting M109 macro from $custom_config"
-                $CONFIG_HELPER --file $filename --remove-section "gcode_macro M109"
-                changed=1
-            fi
-        done
-    fi
-    custom_configs=$(find $BASEDIR/printer_data/config/ -maxdepth 1 -exec grep -l "\[gcode_macro M190\]" {} \;)
-    if [ -n "$custom_configs" ]; then
-        for custom_config in $custom_configs; do
-            filename=$(basename $custom_config)
-            if [ "$filename" != "useful_macros.cfg" ]; then
-                echo "INFO: Deleting M190 macro from $custom_config"
-                $CONFIG_HELPER --file $filename --remove-section "gcode_macro M190"
-                changed=1
-            fi
-        done
-    fi
-    sync
-    return $changed
-}
-
 # special mode to update the repo only
 # this stuff we do not want to have a log file for
 if [ "$1" = "--update-repo" ] || [ "$1" = "--update-branch" ]; then
@@ -1628,10 +1533,6 @@ cd - > /dev/null
     install_mainsail $mode
     install_mainsail=$?
 
-    # KAMP is in the moonraker.conf file so it must be installed before moonraker is first started
-    install_kamp $mode
-    install_kamp=$?
-
     install_klipper $mode $probe
     install_klipper=$?
 
@@ -1706,10 +1607,6 @@ cd - > /dev/null
         apply_mount_overrides=$?
     fi
 
-    # cleanup any M109 or M190 redefined
-    fix_custom_config
-    fix_custom_config=$?
-
     fixup_client_variables_config
     fixup_client_variables_config=$?
     if [ $fixup_client_variables_config -eq 0 ]; then
@@ -1738,7 +1635,7 @@ cd - > /dev/null
         fi
     fi
 
-    if [ $fix_custom_config -ne 0 ] || [ $fixup_client_variables_config -ne 0 ] || [ $apply_overrides -ne 0 ] || [ $apply_mount_overrides -ne 0 ] || [ $install_cartographer_klipper -ne 0 ] || [ $install_beacon_klipper -ne 0 ] || [ $install_kamp -ne 0 ] || [ $install_klipper -ne 0 ] || [ $setup_probe -ne 0 ] || [ $setup_probe_specific -ne 0 ]; then
+    if [ $fix_custom_config -ne 0 ] || [ $fixup_client_variables_config -ne 0 ] || [ $apply_overrides -ne 0 ] || [ $apply_mount_overrides -ne 0 ] || [ $install_cartographer_klipper -ne 0 ] || [ $install_beacon_klipper -ne 0 ] || [ $install_klipper -ne 0 ] || [ $setup_probe -ne 0 ] || [ $setup_probe_specific -ne 0 ]; then
         if [ "$client" = "cli" ]; then
             echo
             echo "INFO: Restarting Klipper ..."

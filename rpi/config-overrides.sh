@@ -1,7 +1,7 @@
 #!/bin/sh
 
 BASEDIR=/home/pi
-CONFIG_OVERRIDES="$BASEDIR/pellcorp/k1/config-overrides.py"
+CONFIG_OVERRIDES="$BASEDIR/pellcorp/rpi/config-overrides.py"
 
 MODEL=$(/usr/bin/get_sn_mac.sh model)
 if [ "$MODEL" = "CR-K1" ] || [ "$MODEL" = "K1C" ] || [ "$MODEL" = "K1 SE" ]; then
@@ -75,7 +75,7 @@ override_file() {
     fi
 
     overrides_file="$BASEDIR/pellcorp-overrides/$file"
-    original_file="$BASEDIR/pellcorp/k1/$file"
+    original_file="$BASEDIR/pellcorp/rpi/$file"
     updated_file="$BASEDIR/printer_data/config/$file"
     
     if [ -f "$BASEDIR/pellcorp-backups/$file" ]; then
@@ -87,7 +87,7 @@ override_file() {
         # for printer.cfg, useful_macros.cfg, start_end.cfg, fan_control.cfg and moonraker.conf - there must be an pellcorp-backups file
         echo "INFO: Overrides not supported for $file"
         return 0
-    elif [ ! -f "$BASEDIR/pellcorp/k1/$file" ]; then
+    elif [ ! -f "$BASEDIR/pellcorp/rpi/$file" ]; then
         if ! echo $file | grep -qE "printer([0-9]+).cfg"; then
             echo "INFO: Backing up $BASEDIR/printer_data/config/$file ..."
             cp  $BASEDIR/printer_data/config/$file $BASEDIR/pellcorp-overrides/
@@ -115,6 +115,14 @@ override_file() {
     # we renamed the SENSORLESS_PARAMS to hide it
     if [ -f $BASEDIR/pellcorp-overrides/sensorless.cfg ]; then
       sed -i 's/gcode_macro SENSORLESS_PARAMS/gcode_macro _SENSORLESS_PARAMS/g' $BASEDIR/pellcorp-overrides/sensorless.cfg
+    elif [ -f $BASEDIR/pellcorp-overrides/KAMP_Settings.cfg ]; then
+      # remove any overrides for these values which do not apply to Smart Park and Line Purge
+      sed -i '/variable_verbose_enable/d' $BASEDIR/pellcorp-overrides/KAMP_Settings.cfg
+      sed -i '/variable_mesh_margin/d' $BASEDIR/pellcorp-overrides/KAMP_Settings.cfg
+      sed -i '/variable_fuzz_amount/d' $BASEDIR/pellcorp-overrides/KAMP_Settings.cfg
+      sed -i '/variable_probe_dock_enable/d' $BASEDIR/pellcorp-overrides/KAMP_Settings.cfg
+      sed -i '/variable_attach_macro/d' $BASEDIR/pellcorp-overrides/KAMP_Settings.cfg
+      sed -i '/variable_detach_macro/d' $BASEDIR/pellcorp-overrides/KAMP_Settings.cfg
     fi
 
     if [ "$file" = "printer.cfg" ]; then
@@ -211,8 +219,8 @@ else
   fi
 
   # special case for moonraker.secrets
-  if [ -f $BASEDIR/printer_data/moonraker.secrets ] && [ -f $BASEDIR/pellcorp/k1/moonraker.secrets ]; then
-      diff $BASEDIR/printer_data/moonraker.secrets $BASEDIR/pellcorp/k1/moonraker.secrets > /dev/null
+  if [ -f $BASEDIR/printer_data/moonraker.secrets ] && [ -f $BASEDIR/pellcorp/rpi/moonraker.secrets ]; then
+      diff $BASEDIR/printer_data/moonraker.secrets $BASEDIR/pellcorp/rpi/moonraker.secrets > /dev/null
       if [ $? -ne 0 ]; then
           echo "INFO: Backing up $BASEDIR/printer_data/moonraker.secrets..."
           cp $BASEDIR/printer_data/moonraker.secrets $BASEDIR/pellcorp-overrides/
@@ -229,7 +237,7 @@ else
   # we want the printer.cfg to be done last
   override_file printer.cfg
 
-  $BASEDIR/pellcorp/k1/update-guppyscreen.sh --config-overrides
+  $BASEDIR/pellcorp/rpi/update-guppyscreen.sh --config-overrides
 fi
 
 cd $BASEDIR/pellcorp-overrides

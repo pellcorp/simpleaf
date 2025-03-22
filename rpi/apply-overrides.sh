@@ -57,6 +57,16 @@ function apply_overrides() {
                 cp $overrides_dir/$file $BASEDIR/printer_data/
             elif [ "$file" = "guppyscreen.json" ]; then
                 $BASEDIR/pellcorp/k1/update-guppyscreen.sh --apply-overrides
+            elif [ "$file" = "KAMP_Settings.cfg" ]; then # KAMP_Settings.cfg is gone apply any overrides to start_end.cfg
+                # remove any overrides for these values which do not apply to Smart Park and Line Purge
+                sed -i '/variable_verbose_enable/d' $BASEDIR/pellcorp-overrides/KAMP_Settings.cfg
+                sed -i '/variable_mesh_margin/d' $BASEDIR/pellcorp-overrides/KAMP_Settings.cfg
+                sed -i '/variable_fuzz_amount/d' $BASEDIR/pellcorp-overrides/KAMP_Settings.cfg
+                sed -i '/variable_probe_dock_enable/d' $BASEDIR/pellcorp-overrides/KAMP_Settings.cfg
+                sed -i '/variable_attach_macro/d' $BASEDIR/pellcorp-overrides/KAMP_Settings.cfg
+                sed -i '/variable_detach_macro/d' $BASEDIR/pellcorp-overrides/KAMP_Settings.cfg
+
+                $CONFIG_HELPER --file start_end.cfg --overrides $overrides_dir/$file || exit $?
             elif [ -L $BASEDIR/printer_data/config/$file ] || [ "$file" = "useful_macros.cfg" ] || [ "$file" = "internal_macros.cfg" ] || [ "$file" = "guppyscreen.cfg" ]; then
                 if [ "$file" = "guppyscreen.cfg" ]; then  # we removed guppy module loader completely
                     $CONFIG_HELPER --file guppyscreen.cfg --remove-section guppy_module_loader
