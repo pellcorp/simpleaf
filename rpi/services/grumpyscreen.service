@@ -1,5 +1,5 @@
 [Unit]
-Description=GuppyScreen
+Description=GrumpyScreen
 After=moonraker.service
 StartLimitIntervalSec=0
 ConditionPathExists=/dev/tty1

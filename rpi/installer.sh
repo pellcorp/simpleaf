@@ -14,7 +14,7 @@ if [ "$(dirname $(readlink -f $0))" != "$BASEDIR/pellcorp/rpi" ]; then
   exit 1
 fi
 
-CONFIG_HELPER="$BASEDIR/pellcorp/k1/config-helper.py"
+CONFIG_HELPER="$BASEDIR/pellcorp/rpi/config-helper.py"
 
 # thanks to @Nestaa51 for the timeout changes to not wait forever for moonraker
 function restart_moonraker() {
@@ -89,14 +89,8 @@ function update_klipper() {
       sync
   fi
   if [ -d $BASEDIR/beacon-klipper ]; then
-      $BASEDIR/pellcorp/k1/beacon-install.sh || return $?
+      $BASEDIR/pellcorp/rpi/beacon-install.sh || return $?
       sync
-  fi
-  /usr/share/klippy-env/bin/python3 -m compileall $BASEDIR/klipper/klippy || return $?
-  $BASEDIR/pellcorp/k1/tools/check-firmware.sh --status
-  if [ $? -eq 0 ]; then
-      echo "INFO: Restarting Klipper ..."
-      sudo systemctl restart klipper
   fi
   return $?
 }
@@ -116,29 +110,33 @@ function install_config_updater() {
     fi
 }
 
-function install_webcam() {
+function install_crowsnest() {
     local mode=$1
     
-    grep -q "webcam" $BASEDIR/pellcorp.done
+    grep -q "crowsnest" $BASEDIR/pellcorp.done
     if [ $? -ne 0 ]; then
-        if [ "$mode" != "update" ] || [ ! -f /opt/bin/mjpg_streamer ]; then
+        if [ "$mode" != "update" ] || [ ! -f /usr/local/bin/crowsnest ]; then
             echo
-            echo "INFO: Installing mjpg streamer ..."
-            /opt/bin/opkg install mjpg-streamer mjpg-streamer-input-http mjpg-streamer-input-uvc mjpg-streamer-output-http mjpg-streamer-www || exit $?
+            echo "INFO: Installing crowsnest ..."
+            cd $BASEDIR
+            git clone https://github.com/mainsail-crew/crowsnest.git $BASEDIR/crowsnest
+            cd $BASEDIR/crowsnest
+            sudo CROWSNEST_UNATTENDED=1 make install
         fi
 
-        echo "INFO: Updating webcam config ..."
+        echo "INFO: Updating crowsnest config ..."
 
-        if [ -f /etc/systemd/system/webcam.service ]; then
-            sudo systemctl stop webcam > /dev/null 2>&1
+        if [ -f /etc/systemd/system/crowsnest.service ]; then
+            sudo systemctl stop crowsnest
         fi
 
-        cp $BASEDIR/pellcorp/k1/services/webcam.service /etc/systemd/system/
-        sudo systemctl start webcam
+        cp $BASEDIR/pellcorp/rpi/services/crowsnest.service /etc/systemd/system/
+        sudo systemctl enable crowsnest
+        sudo systemctl start crowsnest
 
-        cp $BASEDIR/pellcorp/k1/webcam.conf $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/webcam.conf $BASEDIR/printer_data/config/ || exit $?
 
-        echo "webcam" >> $BASEDIR/pellcorp.done
+        echo "crowsnest" >> $BASEDIR/pellcorp.done
         sync
         return 1
     fi
@@ -153,8 +151,8 @@ function install_moonraker() {
         echo
         
         if [ "$mode" != "update" ] && [ -d $BASEDIR/moonraker ]; then
-            if [ -f /etc/init.d/S56moonraker_service ]; then
-                /etc/init.d/S56moonraker_service stop
+            if [ -f /etc/systemd/system/moonraker.service ]; then
+                sudo systemctl stop moonraker
             fi
             if [ -d $BASEDIR/printer_data/database/ ]; then
                 [ -f $BASEDIR/moonraker-database.tar.gz ] && rm $BASEDIR/moonraker-database.tar.gz
@@ -170,19 +168,6 @@ function install_moonraker() {
 
         if [ "$mode" != "update" ] && [ -d $BASEDIR/moonraker-env ]; then
             rm -rf $BASEDIR/moonraker-env
-        elif [ ! -d $BASEDIR/moonraker-env/lib/python3.8/site-packages/dbus_fast ] || [ -d $BASEDIR/moonraker-env/lib/python3.8/site-packages/apprise-1.7.1.dist-info ]; then
-            echo "INFO: Forcing recreation of moonraker-env ..."
-            rm -rf $BASEDIR/moonraker-env
-        fi
-
-        if [ -d $BASEDIR/moonraker/.git ]; then
-            cd $BASEDIR/moonraker
-            MOONRAKER_URL=$(git remote get-url origin)
-            cd - > /dev/null
-            if [ "$MOONRAKER_URL" != "https://github.com/pellcorp/moonraker.git" ]; then
-                echo "INFO: Forcing moonraker to switch to pellcorp/moonraker"
-                rm -rf $BASEDIR/moonraker
-            fi
         fi
 
         if [ ! -d $BASEDIR/moonraker/.git ]; then
@@ -192,14 +177,7 @@ function install_moonraker() {
             [ -d $BASEDIR/moonraker-env ] && rm -rf $BASEDIR/moonraker-env
 
             echo
-            if [ "$AF_GIT_CLONE" = "ssh" ]; then
-                export GIT_SSH_IDENTITY=moonraker
-                export GIT_SSH=$BASEDIR/pellcorp/k1/ssh/git-ssh.sh
-                git clone git@github.com:pellcorp/moonraker.git $BASEDIR/moonraker || exit $?
-                cd $BASEDIR/moonraker && git remote set-url origin https://github.com/pellcorp/moonraker.git && cd - > /dev/null
-            else
-                git clone https://github.com/pellcorp/moonraker.git $BASEDIR/moonraker || exit $?
-            fi
+            git clone https://github.com/pellcorp/moonraker.git $BASEDIR/moonraker || exit $?
 
             if [ -f $BASEDIR/moonraker-database.tar.gz ]; then
                 echo
@@ -219,42 +197,41 @@ function install_moonraker() {
         fi
 
         if [ ! -d $BASEDIR/moonraker-env ]; then
-            tar -zxf $BASEDIR/pellcorp/k1/moonraker-env.tar.gz -C $BASEDIR/ || exit $?
-        fi
-
-        if [ "$mode" != "update" ] || [ ! -f /opt/bin/ffmpeg ]; then
-            echo "INFO: Upgrading ffmpeg for moonraker timelapse ..."
-            /opt/bin/opkg install ffmpeg || exit $?
+            virtualenv -p python3 $BASEDIR/moonraker-env
+            $BASEDIR/moonraker-env/bin/pip install -r $BASEDIR/moonraker/scripts/moonraker-requirements.txt
+            $BASEDIR/moonraker-env/bin/pip install -r $BASEDIR/moonraker/scripts/moonraker-speedups.txt
         fi
 
         echo "INFO: Updating moonraker config ..."
 
         # an existing bug where the moonraker secrets was not correctly copied
         if [ ! -f $BASEDIR/printer_data/moonraker.secrets ]; then
-            cp $BASEDIR/pellcorp/k1/moonraker.secrets $BASEDIR/printer_data/
+            cp $BASEDIR/pellcorp/rpi/moonraker.secrets $BASEDIR/printer_data/
         fi
 
-        cp $BASEDIR/pellcorp/k1/services/S56moonraker_service /etc/init.d/ || exit $?
-        cp $BASEDIR/pellcorp/k1/moonraker.conf $BASEDIR/printer_data/config/ || exit $?
-        ln -sf $BASEDIR/pellcorp/k1/moonraker.asvc $BASEDIR/printer_data/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/services/moonraker.service /etc/systemd/system/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/moonraker.conf $BASEDIR/printer_data/config/ || exit $?
+        ln -sf $BASEDIR/pellcorp/rpi/moonraker.asvc $BASEDIR/printer_data/ || exit $?
 
         ln -sf $BASEDIR/moonraker-timelapse/component/timelapse.py $BASEDIR/moonraker/moonraker/components/ || exit $?
         if ! grep -q "moonraker/components/timelapse.py" "$BASEDIR/moonraker/.git/info/exclude"; then
             echo "moonraker/components/timelapse.py" >> "$BASEDIR/moonraker/.git/info/exclude"
         fi
         ln -sf $BASEDIR/moonraker-timelapse/klipper_macro/timelapse.cfg $BASEDIR/printer_data/config/ || exit $?
-        cp $BASEDIR/pellcorp/k1/timelapse.conf $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/timelapse.conf $BASEDIR/printer_data/config/ || exit $?
 
-        ln -sf $BASEDIR/pellcorp/k1/spoolman.cfg $BASEDIR/printer_data/config/ || exit $?
-        cp $BASEDIR/pellcorp/k1/spoolman.conf $BASEDIR/printer_data/config/ || exit $?
+        ln -sf $BASEDIR/pellcorp/rpi/spoolman.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/spoolman.conf $BASEDIR/printer_data/config/ || exit $?
 
         # after an initial install do not overwrite notifier.conf or moonraker.secrets
         if [ ! -f $BASEDIR/printer_data/config/notifier.conf ]; then
-            cp $BASEDIR/pellcorp/k1/notifier.conf $BASEDIR/printer_data/config/ || exit $?
+            cp $BASEDIR/pellcorp/rpi/notifier.conf $BASEDIR/printer_data/config/ || exit $?
         fi
         if [ ! -f $BASEDIR/printer_data/moonraker.secrets ]; then
-            cp $BASEDIR/pellcorp/k1/moonraker.secrets $BASEDIR/printer_data/ || exit $?
+            cp $BASEDIR/pellcorp/rpi/moonraker.secrets $BASEDIR/printer_data/ || exit $?
         fi
+
+        sudo systemctl enable moonraker
 
         echo "moonraker" >> $BASEDIR/pellcorp.done
         sync
@@ -287,9 +264,9 @@ function install_nginx() {
         fi
 
         echo "INFO: Updating nginx config ..."
-        cp $BASEDIR/pellcorp/k1/nginx.conf /etc/nginx/ || exit $?
-        cp $BASEDIR/pellcorp/k1/nginx/fluidd /etc/nginx/sites-enabled/ || exit $?
-        cp $BASEDIR/pellcorp/k1/nginx/mainsail /etc/nginx/sites-enabled/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/nginx.conf /etc/nginx/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/nginx/fluidd /etc/nginx/sites-enabled/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/nginx/mainsail /etc/nginx/sites-enabled/ || exit $?
 
         if [ "$default_ui" = "mainsail" ]; then
           echo "INFO: Restoring mainsail as default UI"
@@ -297,7 +274,7 @@ function install_nginx() {
           sed -i 's/.*#listen 80 default_server;/    listen 80 default_server;/g' $BASEDIR/nginx/nginx/sites/mainsail || exit $?
         fi
 
-        cp $BASEDIR/pellcorp/k1/services/S50nginx_service /etc/init.d/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/services/nginx.service /etc/systemd/system/ || exit $?
 
         echo "nginx" >> $BASEDIR/pellcorp.done
         sync
@@ -339,9 +316,6 @@ function install_fluidd() {
 
         ln -sf $BASEDIR/fluidd-config/client.cfg $BASEDIR/printer_data/config/
         $CONFIG_HELPER --add-include "client.cfg" || exit $?
-
-        # for moonraker to be able to use moonraker fluidd client.cfg out of the box need to
-        ln -sf $BASEDIR/printer_data/ /root
 
         # these are already defined in fluidd config so get rid of them from printer.cfg
         $CONFIG_HELPER --remove-section "pause_resume" || exit $?
@@ -458,29 +432,28 @@ function install_klipper() {
         fi
 
         echo "INFO: Updating klipper config ..."
-        $BASEDIR/klipper-env/bin/python3 -m compileall $BASEDIR/klipper/klippy || exit $?
 
-        sudo cp $BASEDIR/pellcorp/k1/services/klipper.service /etc/systemd/system || exit $?
+        sudo cp $BASEDIR/pellcorp/rpi/services/klipper.service /etc/systemd/system || exit $?
 
-        cp $BASEDIR/pellcorp/k1/sensorless.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/sensorless.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "sensorless.cfg" || exit $?
 
-        cp $BASEDIR/pellcorp/k1/internal_macros.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/internal_macros.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "internal_macros.cfg" || exit $?
 
-        cp $BASEDIR/pellcorp/k1/useful_macros.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/useful_macros.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "useful_macros.cfg" || exit $?
 
-        cp $BASEDIR/pellcorp/k1/start_end.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/start_end.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "start_end.cfg" || exit $?
 
-        ln -sf /usr/data/pellcorp/k1/Line_Purge.cfg /usr/data/printer_data/config/ || exit $?
+        ln -sf /usr/data/pellcorp/rpi/Line_Purge.cfg /usr/data/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "Line_Purge.cfg" || exit $?
 
-        ln -sf /usr/data/pellcorp/k1/Smart_Park.cfg /usr/data/printer_data/config/ || exit $?
+        ln -sf /usr/data/pellcorp/rpi/Smart_Park.cfg /usr/data/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "Smart_Park.cfg" || exit $?
 
-        cp $BASEDIR/pellcorp/k1/fan_control.cfg $BASEDIR/printer_data/config || exit $?
+        cp $BASEDIR/pellcorp/rpi/fan_control.cfg $BASEDIR/printer_data/config || exit $?
         $CONFIG_HELPER --add-include "fan_control.cfg" || exit $?
 
         # just in case its missing from stock printer.cfg make sure it gets added
@@ -503,8 +476,8 @@ function install_guppyscreen() {
         echo
 
         if [ "$mode" != "update" ] && [ -d $BASEDIR/guppyscreen ]; then
-            if [ -f /etc/systemd/system/guppyscreen.service ]; then
-              sudo systemctl stop guppyscreen > /dev/null 2>&1
+            if [ -f /etc/systemd/system/grumpyscreen.service ]; then
+              sudo systemctl stop grumpyscreen > /dev/null 2>&1
             fi
             rm -rf $BASEDIR/guppyscreen
         fi
@@ -519,9 +492,9 @@ function install_guppyscreen() {
         fi
 
         echo "INFO: Updating grumpyscreen config ..."
-        sudo cp $BASEDIR/pellcorp/k1/services/guppyscreen /etc/systemd/system``/ || exit $?
+        sudo cp $BASEDIR/pellcorp/rpi/services/grumpyscreen.service /etc/systemd/system/ || exit $?
 
-        cp $BASEDIR/pellcorp/k1/guppyscreen.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/guppyscreen.cfg $BASEDIR/printer_data/config/ || exit $?
 
         $CONFIG_HELPER --add-include "guppyscreen.cfg" || exit $?
 
@@ -544,7 +517,7 @@ function setup_probe() {
         $CONFIG_HELPER --remove-section-entry "stepper_z" "position_endstop" || exit $?
         $CONFIG_HELPER --replace-section-entry "stepper_z" "endstop_pin" "probe:z_virtual_endstop" || exit $?
 
-        cp $BASEDIR/pellcorp/k1/quickstart.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/quickstart.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "quickstart.cfg" || exit $?
 
         # because we are using force move with 3mm, as a safety feature we will lower the position max
@@ -574,33 +547,12 @@ function install_cartographer_klipper() {
             echo
             echo "INFO: Installing cartographer-klipper ..."
             git clone https://github.com/pellcorp/cartographer-klipper.git $BASEDIR/cartographer-klipper || exit $?
-        else
-            cd $BASEDIR/cartographer-klipper
-            REMOTE_URL=$(git remote get-url origin)
-            if [ "$REMOTE_URL" != "https://github.com/pellcorp/cartographer-klipper.git" ]; then
-                echo "INFO: Switching cartographer-klipper to pellcorp fork"
-                git remote set-url origin https://github.com/pellcorp/cartographer-klipper.git
-                git fetch origin
-            fi
-
-            branch=$(git rev-parse --abbrev-ref HEAD)
-            # do not stuff up a different branch
-            if [ "$branch" = "master" ]; then
-                revision=$(git rev-parse --short HEAD)
-                # reset our branch or update from v1.0.5
-                if [ "$revision" = "303ea63" ] || [ "$revision" = "8324877" ]; then
-                    echo "INFO: Forcing cartographer-klipper update"
-                    git fetch origin
-                    git reset --hard v1.1.0
-                fi
-            fi
         fi
         cd - > /dev/null
 
         echo
         echo "INFO: Running cartographer-klipper installer ..."
         bash $BASEDIR/cartographer-klipper/install.sh || exit $?
-        /usr/share/klippy-env/bin/python3 -m compileall $BASEDIR/klipper/klippy || exit $?
 
         echo "cartographer-klipper" >> $BASEDIR/pellcorp.done
         sync
@@ -625,9 +577,7 @@ function install_beacon_klipper() {
         fi
 
         # FIXME - maybe beacon will accept a PR to make their installer work on k1
-        $BASEDIR/pellcorp/k1/beacon-install.sh
-
-        /usr/share/klippy-env/bin/python3 -m compileall $BASEDIR/klipper/klippy || exit $?
+        $BASEDIR/pellcorp/rpi/beacon-install.sh
 
         echo "beacon-klipper" >> $BASEDIR/pellcorp.done
         sync
@@ -700,10 +650,10 @@ function setup_bltouch() {
 
         cleanup_probes
 
-        cp $BASEDIR/pellcorp/k1/bltouch.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/bltouch.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "bltouch.cfg" || exit $?
 
-        cp $BASEDIR/pellcorp/k1/bltouch_macro.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/bltouch_macro.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "bltouch_macro.cfg" || exit $?
 
         # need to add a empty bltouch section for baby stepping to work
@@ -733,10 +683,10 @@ function setup_microprobe() {
 
         cleanup_probes
 
-        cp $BASEDIR/pellcorp/k1/microprobe.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/microprobe.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "microprobe.cfg" || exit $?
 
-        cp $BASEDIR/pellcorp/k1/microprobe_macro.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/microprobe_macro.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "microprobe_macro.cfg" || exit $?
 
         # remove previous directly imported microprobe config
@@ -769,7 +719,7 @@ function setup_klicky() {
 
         cleanup_probes
 
-        cp $BASEDIR/pellcorp/k1/klicky.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/klicky.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "klicky.cfg" || exit $?
 
         # need to add a empty probe section for baby stepping to work
@@ -782,7 +732,7 @@ function setup_klicky() {
           $CONFIG_HELPER --replace-section-entry "probe" "z_offset" "2.0" || exit $?
         fi
 
-        cp $BASEDIR/pellcorp/k1/klicky_macro.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/klicky_macro.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "klicky_macro.cfg" || exit $?
 
         echo "klicky-probe" >> $BASEDIR/pellcorp.done
@@ -819,15 +769,15 @@ function setup_cartotouch() {
 
         cleanup_probes
 
-        cp $BASEDIR/pellcorp/k1/cartographer.conf $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/cartographer.conf $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --file moonraker.conf --add-include "cartographer.conf" || exit $?
 
-        cp $BASEDIR/pellcorp/k1/cartotouch_macro.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/cartotouch_macro.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "cartotouch_macro.cfg" || exit $?
 
         $CONFIG_HELPER --replace-section-entry "stepper_z" "homing_retract_dist" "0" || exit $?
 
-        cp $BASEDIR/pellcorp/k1/cartotouch.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/cartotouch.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "cartotouch.cfg" || exit $?
 
         y_position_mid=$($CONFIG_HELPER --get-section-entry "stepper_y" "position_max" --divisor 2 --integer)
@@ -858,7 +808,7 @@ function setup_cartotouch() {
             $CONFIG_HELPER --replace-section-entry "scanner" "mode" "touch" || exit $?
         fi
 
-        cp $BASEDIR/pellcorp/k1/cartographer_calibrate.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/cartographer_calibrate.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "cartographer_calibrate.cfg" || exit $?
 
         # Ender 5 Max we don't have firmware for it, so need to configure cartographer instead for adxl
@@ -904,15 +854,15 @@ function setup_beacon() {
 
         cleanup_probes
 
-        cp $BASEDIR/pellcorp/k1/beacon.conf $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/beacon.conf $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --file moonraker.conf --add-include "beacon.conf" || exit $?
 
-        cp $BASEDIR/pellcorp/k1/beacon_macro.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/beacon_macro.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "beacon_macro.cfg" || exit $?
 
         $CONFIG_HELPER --replace-section-entry "stepper_z" "homing_retract_dist" "0" || exit $?
 
-        cp $BASEDIR/pellcorp/k1/beacon.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/beacon.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "beacon.cfg" || exit $?
 
         # for beacon can't use homing override
@@ -972,12 +922,12 @@ function setup_btteddy() {
 
         cleanup_probes
 
-        cp $BASEDIR/pellcorp/k1/btteddy.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/btteddy.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "btteddy.cfg" || exit $?
 
         set_serial_btteddy
 
-        cp $BASEDIR/pellcorp/k1/btteddy_macro.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/btteddy_macro.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "btteddy_macro.cfg" || exit $?
 
         # K1 SE has no chamber fan
@@ -989,7 +939,7 @@ function setup_btteddy() {
         $CONFIG_HELPER --add-section "probe_eddy_current btt_eddy" || exit $?
 
 # these guided macros are out of date, removing them temporarily to avoid confusion
-#        cp $BASEDIR/pellcorp/k1/btteddy_calibrate.cfg $BASEDIR/printer_data/config/ || exit $?
+#        cp $BASEDIR/pellcorp/rpi/btteddy_calibrate.cfg $BASEDIR/printer_data/config/ || exit $?
 #        $CONFIG_HELPER --add-include "btteddy_calibrate.cfg" || exit $?
 
         echo "btteddy-probe" >> $BASEDIR/pellcorp.done
@@ -1024,12 +974,12 @@ function setup_eddyng() {
 
         cleanup_probes
 
-        cp $BASEDIR/pellcorp/k1/eddyng.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/eddyng.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "eddyng.cfg" || exit $?
 
         set_serial_eddyng
 
-        cp $BASEDIR/pellcorp/k1/eddyng_macro.cfg $BASEDIR/printer_data/config/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/eddyng_macro.cfg $BASEDIR/printer_data/config/ || exit $?
         $CONFIG_HELPER --add-include "eddyng_macro.cfg" || exit $?
 
         $CONFIG_HELPER --remove-section "probe_eddy_ng btt_eddy" || exit $?
@@ -1042,22 +992,11 @@ function setup_eddyng() {
     return 0
 }
 
-function install_entware() {
-    local mode=$1
-    if ! grep -q "entware" $BASEDIR/pellcorp.done; then
-        echo
-        $BASEDIR/pellcorp/k1/entware-install.sh "$mode" || exit $?
-
-        echo "entware" >> $BASEDIR/pellcorp.done
-        sync
-    fi
-}
-
 function apply_overrides() {
     return_status=0
     grep -q "overrides" $BASEDIR/pellcorp.done
     if [ $? -ne 0 ]; then
-        $BASEDIR/pellcorp/k1/apply-overrides.sh
+        $BASEDIR/pellcorp/rpi/apply-overrides.sh
         return_status=$?
         echo "overrides" >> $BASEDIR/pellcorp.done
         sync
@@ -1190,41 +1129,6 @@ elif [ "$1" = "--klipper-branch" ]; then # convenience for testing new features
         echo "Error invalid branch specified"
         exit 1
     fi
-elif [ "$1" = "--klipper-repo" ]; then # convenience for testing new features
-    if [ -n "$2" ]; then
-        klipper_repo=$2
-        if [ "$klipper_repo" = "k1-carto-klipper" ]; then
-            echo "ERROR: Switching to k1-carto-klipper is no longer supported"
-            exit 1
-        fi
-
-        if [ -d $BASEDIR/klipper/.git ]; then
-            cd $BASEDIR/klipper/
-            remote_repo=$(git remote get-url origin | awk -F '/' '{print $NF}' | sed 's/.git//g')
-            cd - > /dev/null
-            if [ "$remote_repo" != "$klipper_repo" ]; then
-                echo "INFO: Switching klipper from pellcorp/$remote_repo to pellcorp/${klipper_repo} ..."
-                rm -rf $BASEDIR/klipper
-
-                echo "$klipper_repo" > $BASEDIR/pellcorp.klipper
-            fi
-        fi
-
-        if [ ! -d $BASEDIR/klipper ]; then
-            git clone https://github.com/pellcorp/${klipper_repo}.git $BASEDIR/klipper || exit $?
-            if [ -n "$3" ]; then
-              cd $BASEDIR/klipper && git switch $3 && cd - > /dev/null
-            fi
-        else
-            update_repo $BASEDIR/klipper $3 || exit $?
-        fi
-
-        update_klipper || exit $?
-        exit 0
-    else
-        echo "Error invalid klipper repo specified"
-        exit 1
-    fi
 fi
 
 export TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
@@ -1342,7 +1246,7 @@ cd - > /dev/null
       fi
 
       if [ -n "$mount" ]; then
-          $BASEDIR/pellcorp/k1/apply-mount-overrides.sh --verify $probe $mount
+          $BASEDIR/pellcorp/rpi/apply-mount-overrides.sh --verify $probe $mount
           if [ $? -eq 0 ]; then
               echo "INFO: Mount is $mount"
           else
@@ -1423,7 +1327,7 @@ cd - > /dev/null
                 if [ "$client" = "cli" ]; then
                     echo
                     echo "INFO: Restarting Klipper ..."
-                    /etc/init.d/S55klipper_service restart
+                    sudo systemctl restart klipper
                 else
                     echo "WARNING: Klipper restart required"
                 fi
@@ -1440,18 +1344,11 @@ cd - > /dev/null
     # to avoid cluttering the printer_data/config directory lets move stuff
     mkdir -p $BASEDIR/printer_data/config/backups/
 
-    # we don't do these kinds of backups anymore
-    rm $BASEDIR/printer_data/config/*.bkp 2> /dev/null
-
     echo "INFO: Backing up existing configuration ..."
-    TIMESTAMP=${TIMESTAMP} $BASEDIR/pellcorp/k1/tools/backups.sh --create
+    TIMESTAMP=${TIMESTAMP} $BASEDIR/pellcorp/rpi/tools/backups.sh --create
     echo
 
     mkdir -p $BASEDIR/pellcorp-backups
-    # the pellcorp-backups do not need .pellcorp extension, so this is to fix backwards compatible
-    if [ -f $BASEDIR/pellcorp-backups/printer.pellcorp.cfg ]; then
-        mv $BASEDIR/pellcorp-backups/printer.pellcorp.cfg $BASEDIR/pellcorp-backups/printer.cfg
-    fi
 
     # so if the installer has never been run we should grab a backup of the printer.cfg
     if [ ! -f $BASEDIR/pellcorp.done ] && [ ! -f $BASEDIR/pellcorp-backups/printer.factory.cfg ]; then
@@ -1475,7 +1372,7 @@ cd - > /dev/null
     if [ "$mode" = "reinstall" ] || [ "$mode" = "update" ]; then
         if [ "$skip_overrides" != "true" ]; then
             if [ -f $BASEDIR/pellcorp-backups/printer.cfg ]; then
-                $BASEDIR/pellcorp/k1/config-overrides.sh
+                $BASEDIR/pellcorp/rpi/config-overrides.sh
             elif [ -f $BASEDIR/pellcorp.done ]; then # for a factory reset this warning is superfluous
               echo "WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING"
               echo "WARNING: No $BASEDIR/pellcorp-backups/printer.cfg - config overrides won't be generated!"
@@ -1515,11 +1412,8 @@ cd - > /dev/null
     cd $HOME
 
     touch $BASEDIR/pellcorp.done
-    sync
 
-    install_entware $mode
-    install_webcam $mode
-    install_boot_display
+    install_crowsnest $mode
 
     install_moonraker $mode
     install_moonraker=$?
@@ -1603,7 +1497,7 @@ cd - > /dev/null
 
     apply_mount_overrides=0
     if [ -n "$mount" ]; then
-        $BASEDIR/pellcorp/k1/apply-mount-overrides.sh $probe $mount
+        $BASEDIR/pellcorp/rpi/apply-mount-overrides.sh $probe $mount
         apply_mount_overrides=$?
     fi
 
@@ -1613,11 +1507,7 @@ cd - > /dev/null
         echo "INFO: No changes made"
     fi
 
-    echo
-    $BASEDIR/pellcorp/k1/update-ip-address.sh
-    update_ip_address=$?
-
-    if [ $apply_overrides -ne 0 ] || [ $install_moonraker -ne 0 ] || [ $install_cartographer_klipper -ne 0 ] || [ $install_beacon_klipper -ne 0 ] || [ $update_ip_address -ne 0 ]; then
+    if [ $apply_overrides -ne 0 ] || [ $install_moonraker -ne 0 ] || [ $install_cartographer_klipper -ne 0 ] || [ $install_beacon_klipper -ne 0 ]; then
         if [ "$client" = "cli" ]; then
             restart_moonraker
         else
@@ -1629,7 +1519,7 @@ cd - > /dev/null
         if [ "$client" = "cli" ]; then
             echo
             echo "INFO: Restarting Nginx ..."
-            /etc/init.d/S50nginx_service restart
+            sudo systemctl restart nginx
         else
             echo "WARNING: NGINX restart required"
         fi
@@ -1639,7 +1529,7 @@ cd - > /dev/null
         if [ "$client" = "cli" ]; then
             echo
             echo "INFO: Restarting Klipper ..."
-            /etc/init.d/S55klipper_service restart
+            sudo systemctl restart Klipper
         else
             echo "WARNING: Klipper restart required"
         fi
@@ -1649,14 +1539,11 @@ cd - > /dev/null
         if [ "$client" = "cli" ]; then
             echo
             echo "INFO: Restarting Grumpyscreen ..."
-            /etc/init.d/S99guppyscreen restart
+            sudo systemctl restart grumpyscreen
         else
             echo "WARNING: Grumpyscreen restart required"
         fi
     fi
-
-    echo
-    $BASEDIR/pellcorp/k1/tools/check-firmware.sh
 
     echo "installed_sha=$PELLCORP_GIT_SHA" >> $BASEDIR/pellcorp.done
     sync
