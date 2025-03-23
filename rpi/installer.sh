@@ -264,7 +264,7 @@ function install_nginx() {
         fi
 
         echo "INFO: Updating nginx config ..."
-        cp $BASEDIR/pellcorp/rpi/nginx.conf /etc/nginx/ || exit $?
+        cp $BASEDIR/pellcorp/rpi/nginx/upstreams.conf /etc/nginx/conf.d/ || exit $?
         cp $BASEDIR/pellcorp/rpi/nginx/fluidd /etc/nginx/sites-enabled/ || exit $?
         cp $BASEDIR/pellcorp/rpi/nginx/mainsail /etc/nginx/sites-enabled/ || exit $?
 
@@ -395,8 +395,6 @@ function install_klipper() {
     if [ $? -ne 0 ]; then
         echo
 
-        klipper_repo=klipper
-        existing_klipper_repo=$(cat $BASEDIR/pellcorp.klipper 2> /dev/null)
         if [ "$mode" != "update" ] && [ -d $BASEDIR/klipper ]; then
             if [ -f /etc/systemd/system/klipper.service ]; then
                 sudo systemctl restart stop
@@ -407,25 +405,13 @@ function install_klipper() {
         if [ ! -d $BASEDIR/klipper/ ]; then
             install_klipper_packages
 
-            echo "INFO: Installing ${klipper_repo} ..."
-            git clone https://github.com/pellcorp/${klipper_repo}.git $BASEDIR/klipper || exit $?
-        else
-            cd $BASEDIR/klipper/
-            remote_repo=$(git remote get-url origin | awk -F '/' '{print $NF}' | sed 's/.git//g')
-            git log | grep -q "add SET_KINEMATIC_POSITION CLEAR=Z feature to allow us to clear z in sensorless.cfg"
-            klipper_status=$?
-            cd - > /dev/null
-
-            # force klipper update to get reverted kinematic position feature
-            if [ "$remote_repo" = "klipper" ] && [ $klipper_status -ne 0 ]; then
-                echo "INFO: Forcing update of klipper to latest master"
-                update_repo $BASEDIR/klipper master || exit $?
-            fi
+            echo "INFO: Installing klipper ..."
+            git clone https://github.com/pellcorp/klipper-rpi.git $BASEDIR/klipper || exit $?
         fi
 
         sudo usermod -a -G tty pi
         sudo usermod -a -G dialout pi
-        ``
+
         if [ ! -d $BASEDIR/klipper-env ]; then
             virtualenv -p python3 $BASEDIR/klipper-env
             $BASEDIR/klipper-env/bin/pip install -r $BASEDIR/klipper/scripts/klippy-requirements.txt

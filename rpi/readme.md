@@ -10,6 +10,11 @@ The following files were originally from other projects.  Some of these files ar
 - btteddy.cfg, btteddy_macro.cfg originally from -> https://github.com/ballaswag/creality_k1_klipper_mod/tree/master/printer_configs
 - Smart_Park.cfg, Line_Purge.cfg originally from https://github.com/kyleisah/Klipper-Adaptive-Meshing-Purging
 
+## Kiuah
+
+I have taken advantage of the fact kiauh is open source to copy and modify as appropriate some config files from this project,
+specifically some service files and some nginx config.
+
 ## Helper Script
 
 I have taken advantage of the fact helper script is open source to migrate some features from helper script to this project including:
